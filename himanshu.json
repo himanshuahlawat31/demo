@@ -1,0 +1,337 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "adminUsername": {
+      "type": "string"
+    },
+    "adminPassword": {
+      "type": "securestring"
+    },
+
+    "deploymentID": {
+      "type": "string"
+    }
+  },
+  "variables": {
+    "networkSecurityGroupNameLinux": "[concat('ELK', '-nsg')]",
+    "virtualNetworkName": "[concat('ELK', '-vnet')]",
+    "location": "[resourceGroup().location]",
+    "networkSecurityGroupRulesLinux": [
+      {
+        "name": "SSH",
+        "properties": {
+          "priority": 300,
+          "protocol": "TCP",
+          "access": "Allow",
+          "direction": "Inbound",
+          "sourceAddressPrefix": "*",
+          "sourcePortRange": "*",
+          "destinationAddressPrefix": "*",
+          "destinationPortRange": "22"
+        }
+      }
+    ],
+    "publicIpAddressNameELK": "[concat('elk-', 'ip')]",
+    "publicIpAddressNameweb": "[concat('web-', 'ip')]",
+    "publicIpAddressTypeLinux": "Static",
+    "publicIpAddressSkuLinux": "Basic",
+    "virtualNetworAddressPrefixes": [
+      "10.1.0.0/16"
+    ],
+    "subnetname": "default",
+    "vnetId": "[resourceId(resourceGroup().name,'Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
+    "networkInterfaceNameELK": "[concat('ELK-', 'nic')]",
+    "networkInterfaceNameweb": "[concat('WEB-', 'nic')]",
+    "customScriptCommand": "su -c'sh ",
+    "scriptName": "shellscripts-01.sh",
+    "script2Name": "shellscripts-02.sh",
+    "scriptClose": "'",
+    "subnetRef": "[concat(variables('vnetId'), '/subnets/', variables('subnetname'))]",
+    "nsgIdLinux": "[resourceId(resourceGroup().name, 'Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupNameLinux'))]",
+    "virtualMachineNameLinuxELK": "[concat('ELK-', parameters('deploymentID'))]",
+    "virtualMachineNameLinuxweb1": "[concat('Webserver1-', parameters('deploymentID'))]",
+    "virtualMachineSizeLinux": "Standard_B1s",
+    "publicIpAddressDNSNameLinux": "[concat('entp', parameters('deploymentID'))]"
+  },
+
+  "resources": [
+    {
+      "apiVersion": "2016-09-01",
+      "name": "pid-e843308b-3ce2-42a2-b743-2f21b36a5e68",
+      "type": "Microsoft.Resources/deployments",
+      "properties": {
+        "mode": "Incremental",
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "resources": []
+        }
+      }
+    },
+    {
+      "name": "[variables('networkSecurityGroupNameLinux')]",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2019-02-01",
+      "location": "[variables('location')]",
+      "properties": {
+        "securityRules": "[variables('networkSecurityGroupRulesLinux')]"
+      }
+    },
+    {
+      "name": "[variables('publicIpAddressNameELK')]",
+      "type": "Microsoft.Network/publicIpAddresses",
+      "apiVersion": "2019-02-01",
+      "location": "[variables('location')]",
+      "properties": {
+        "publicIpAllocationMethod": "[variables('publicIpAddressTypeLinux')]",
+        "dnsSettings": {
+          "domainNameLabel": "[concat(variables('publicIpAddressDNSNameLinux'))]"
+        }
+      },
+      "sku": {
+        "name": "[variables('publicIpAddressSkuLinux')]"
+      }
+    },
+    {
+      "name": "[variables('virtualNetworkName')]",
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2019-09-01",
+      "location": "[variables('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": "[variables('virtualNetworAddressPrefixes')]"
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetname')]",
+            "properties": {
+              "addressPrefix": "10.1.0.0/24",
+              "delegations": [],
+              "privateEndpointNetworkPolicies": "Enabled",
+              "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+          }
+        ]
+
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2018-10-01",
+      "name": "[variables('networkInterfaceNameELK')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupNameLinux'))]",
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+        "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressNameELK'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[variables('subnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIpAddress": {
+                "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/publicIpAddresses', variables('publicIpAddressNameELK'))]"
+              }
+            }
+          }
+        ],
+        "networkSecurityGroup": {
+          "id": "[variables('nsgIdLinux')]"
+        }
+      }
+    },
+    {
+      "name": "[variables('virtualMachineNameLinuxELK')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2018-10-01",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceNameELK'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('virtualMachineSizeLinux')]"
+        },
+        "storageProfile": {
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          },
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceNameELK'))]"
+            }
+          ]
+        },
+        "osProfile": {
+          "computerName": "[variables('virtualMachineNameLinuxELK')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+
+        }
+
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(variables('virtualMachineNameLinuxELK'),'/elkcustomscriptextension')]",
+      "apiVersion": "2018-06-01",
+      "location": "[variables('location')]",
+      "dependsOn": [ "[concat('Microsoft.Compute/virtualMachines/',variables('virtualMachineNameLinuxELK'))]" ],
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "https://experienceazure.blob.core.windows.net/templates/udacity-security/scripts/shellscripts-01.sh"
+
+          ],
+          "commandToExecute": "[concat(variables('customScriptCommand'),' ',variables('scriptName'), variables('scriptClose'))]"
+
+        }
+
+      }
+
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2018-10-01",
+      "name": "[variables('networkInterfaceNameweb')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupNameLinux'))]",
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+        "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressNameweb'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[variables('subnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIpAddress": {
+                "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/publicIpAddresses', variables('publicIpAddressNameweb'))]"
+              }
+            }
+          }
+        ],
+        "networkSecurityGroup": {
+          "id": "[variables('nsgIdLinux')]"
+        }
+      }
+    },
+    {
+      "name": "[variables('virtualMachineNameLinuxweb1')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2018-10-01",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceNameweb'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('virtualMachineSizeLinux')]"
+        },
+        "storageProfile": {
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          },
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceNameweb'))]"
+            }
+          ]
+        },
+        "osProfile": {
+          "computerName": "[variables('virtualMachineNameLinuxweb1')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+
+        }
+
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(variables('virtualMachineNameLinuxweb1'),'/webcustomscriptextension')]",
+      "apiVersion": "2018-06-01",
+      "location": "[variables('location')]",
+      "dependsOn": [ "[concat('Microsoft.Compute/virtualMachines/',variables('virtualMachineNameLinuxweb1'))]" ],
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "https://experienceazure.blob.core.windows.net/templates/udacity-security/scripts/shellscripts-01.sh"
+
+          ],
+          "commandToExecute": "[concat(variables('customScriptCommand'),' ',variables('script2Name'), variables('scriptClose'))]"
+
+        }
+
+      }
+
+    }
+  ],
+
+  "outputs": {
+
+    "Linux VM Username": {
+      "type": "string",
+      "value": "[parameters('adminUsername')]"
+    },
+    "Linux VM Password": {
+      "type": "string",
+      "value": "[parameters('adminPassword')]"
+    },
+    "Command to Connect to elk VM ": {
+      "type": "string",
+      "value": "[concat('ssh  Udacity-Student@', reference(resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressNameELK'))).dnsSettings.fqdn)]"
+    },
+    "Command to Connect to web VM ": {
+      "type": "string",
+      "value": "[concat('ssh  Udacity-Student@', reference(resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressNameweb'))).dnsSettings.fqdn)]"
+    },
+    "UniqueID": {
+      "type": "string",
+      "value": "[parameters('DeploymentID')]"
+    }
+
+
+  }
+}
